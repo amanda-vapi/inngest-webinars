@@ -1,0 +1,25 @@
+{
+  "type": "apiRequest",
+  "name": "lookup_customer",
+  "function": {
+    "name": "api_request_tool"
+  },
+  "url": "https://YOUR-PUBLIC-URL.example.com/api/customers?contact={{contact}}",
+  "method": "GET",
+  "body": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "contact": {
+        "type": "string",
+        "description": "The caller's email address or phone number. Use the exact value they provided."
+      }
+    },
+    "required": ["contact"]
+  },
+  "timeoutSeconds": 10,
+  "messages": [
+    { "type": "request-start", "content": "Let me look up your account." },
+    { "type": "request-failed", "content": "I couldn't look up the account just yet." }
+  ]
+}

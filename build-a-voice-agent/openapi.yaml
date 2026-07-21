@@ -1,90 +1,126 @@
 openapi: 3.1.0
 info:
-  title: Home Replicator Support API
+  title: Inngest Webinar Voice Support API
   version: 0.1.0
-  description: API contract used by the Vapi customer-service agent and local webinar test endpoint.
-servers:
-  - url: http://localhost:3000
+security:
+  - bearerAuth: []
 paths:
   /api/customers:
     get:
-      summary: Look up a customer by email or phone
+      summary: Look up a customer directly by email or phone
       parameters:
-        - name: email
-          in: query
-          schema: { type: string, format: email }
-        - name: phone
-          in: query
-          schema: { type: string }
+        - { name: contact, in: query, schema: { type: string }, description: Email address or phone number }
+        - { name: email, in: query, schema: { type: string, format: email } }
+        - { name: phone, in: query, schema: { type: string } }
       responses:
-        '200': { description: Customer found, content: { application/json: { schema: { $ref: '#/components/schemas/Customer' } } } }
-        '404': { description: Customer not found }
+        '200':
+          description: Lookup completed, whether or not a customer matched
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    additionalProperties: false
+                    required: [matched, customerId, product, deviceModel, firmwareVersion]
+                    properties:
+                      matched: { type: boolean, const: true }
+                      customerId: { type: string }
+                      product: { type: string }
+                      deviceModel: { type: string }
+                      firmwareVersion: { type: string }
+                  - type: object
+                    additionalProperties: false
+                    required: [matched, nextAction]
+                    properties:
+                      matched: { type: boolean, const: false }
+                      nextAction: { type: string, const: recheck_contact }
   /api/tickets:
     post:
-      summary: Create a support ticket and start the Inngest workflow
+      summary: Create a ticket and emit support/ticket.created
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/CreateTicketRequest' } } }
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSupportTicket' }
       responses:
-        '201': { description: Ticket created, content: { application/json: { schema: { $ref: '#/components/schemas/Ticket' } } } }
-  /test:
-    post:
-      summary: Local test shortcut for the full long-running workflow
-      description: Accepts the exact same body as POST /api/tickets, without API-token enforcement.
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/CreateTicketRequest' } } }
-      responses:
-        '201': { description: Workflow event accepted }
+        '200':
+          description: A prior ticket for this request ID was returned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketCreationResult' }
+        '201':
+          description: Ticket created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketCreationResult' }
+        '409':
+          description: The request ID was previously used with different content
+        '503':
+          description: The ticket was saved but workflow dispatch failed and can be retried
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketDispatchFailure' }
   /api/tickets/{ticketId}/resolve:
     post:
-      summary: Resume a human-review wait with a technician answer
-      parameters: [ { $ref: '#/components/parameters/TicketId' } ]
+      summary: Resume a workflow waiting for human resolution
+      parameters:
+        - { name: ticketId, in: path, required: true, schema: { type: string } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [answer], properties: { answer: { type: string } } } } }
-      responses: { '200': { description: Resolution event sent } }
-  /api/tickets/{ticketId}/feedback:
-    post:
-      summary: Record whether the customer found the reply helpful
-      parameters: [ { $ref: '#/components/parameters/TicketId' } ]
-      requestBody:
-        required: true
-        content: { application/json: { schema: { type: object, required: [helpful], properties: { helpful: { type: boolean } } } } }
-      responses: { '200': { description: Feedback event sent } }
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answer]
+              properties: { answer: { type: string } }
+      responses:
+        '200': { description: Resolution event accepted }
+        '400': { description: Invalid resolution body }
+        '404': { description: Ticket not found }
+        '409': { description: Ticket is not waiting for human review }
+        '503': { description: Resolution event dispatch failed and can be retried }
 components:
-  parameters:
-    TicketId: { name: ticketId, in: path, required: true, schema: { type: string } }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
   schemas:
-    Customer:
+    TicketCreationResult:
       type: object
-      required: [id, name, email, phone, product, replicator_model, firmware_version]
+      additionalProperties: false
+      required: [ok, created, ticketId, ticketReference, ticketSaved, workflowStarted, status, duplicate, retryable]
       properties:
-        id: { type: string, example: cus_amanda }
-        name: { type: string, example: Amanda Martin }
-        email: { type: string, format: email }
-        phone: { type: string }
-        product: { type: string, example: Home Replicator }
-        replicator_model: { type: string, example: XR-200 }
-        firmware_version: { type: string, example: 9.4.0 }
-        warranty_status: { type: string, example: active }
-    CreateTicketRequest:
+        ok: { type: boolean, const: true }
+        created: { type: boolean }
+        ticketId: { type: string }
+        ticketReference: { type: string, pattern: '^REP-[0-9]{6}$' }
+        ticketSaved: { type: boolean, const: true }
+        workflowStarted: { type: boolean, const: true }
+        status: { type: string }
+        duplicate: { type: boolean }
+        retryable: { type: boolean, const: false }
+    TicketDispatchFailure:
       type: object
-      required: [customerId, customerQuestion]
+      additionalProperties: false
+      required: [ok, error, ticketId, ticketReference, ticketSaved, workflowStarted, status, retryable]
       properties:
+        ok: { type: boolean, const: false }
+        error: { type: string, const: workflow_dispatch_failed }
+        ticketId: { type: string }
+        ticketReference: { type: string, pattern: '^REP-[0-9]{6}$' }
+        ticketSaved: { type: boolean, const: true }
+        workflowStarted: { type: boolean, const: false }
+        status: { type: string, const: event_failed }
+        retryable: { type: boolean, const: true }
+    CreateSupportTicket:
+      type: object
+      additionalProperties: false
+      required: [requestId, customerId, issue]
+      properties:
+        requestId: { type: string, description: Server-trusted operation identifier used for idempotency }
         customerId: { type: string, example: cus_amanda }
-        customerQuestion: { type: string, example: My replicator stopped working after the latest update. }
+        issue: { type: string }
         deviceModel: { type: string, example: XR-200 }
         firmwareVersion: { type: string, example: 9.4.0 }
-        symptom: { type: string, example: The thermal-safety light flashes and no item is replicated. }
+        symptom: { type: string }
         errorCode: { type: string, example: THERM-94 }
-        followUpMethod: { type: string, enum: [email, callback], example: email }
-    Ticket:
-      allOf:
-        - $ref: '#/components/schemas/CreateTicketRequest'
-        - type: object
-          required: [id, status, created_at]
-          properties:
-            id: { type: string }
-            status: { type: string, example: researching }
-            created_at: { type: string, format: date-time }

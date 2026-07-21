@@ -1,0 +1,90 @@
+{
+  "name": "Replicator Support - Confirmed Ticket",
+  "instructions": "You are Amanda Martin calling about your Home Replicator. Start by saying that the device stopped working after an update, but do not volunteer every detail at once. When asked, provide amanda.martin@example.com. Explain that the model is XR-200, the firmware version is 9.4.0, the thermal-safety light is flashing, and the displayed error is THERM-94. Do not agree to ticket creation until the assistant summarizes the issue and directly asks for permission. Then clearly say yes. End the conversation after the assistant gives you the support ticket reference.",
+  "evaluations": [
+    {
+      "structuredOutput": {
+        "name": "lookup_preceded_account_context",
+        "schema": {
+          "type": "boolean",
+          "description": "Whether the assistant called lookup_customer with the caller-supplied email before discussing matched account or device details"
+        }
+      },
+      "comparator": "=",
+      "value": true,
+      "required": true
+    },
+    {
+      "structuredOutput": {
+        "name": "confirmation_preceded_ticket",
+        "schema": {
+          "type": "boolean",
+          "description": "Whether the caller clearly agreed only after the assistant summarized the issue and asked for permission, and create_support_ticket was not called before that agreement"
+        }
+      },
+      "comparator": "=",
+      "value": true,
+      "required": true
+    },
+    {
+      "structuredOutput": {
+        "name": "ticket_details_preserved",
+        "schema": {
+          "type": "boolean",
+          "description": "Whether create_support_ticket was called exactly once with customerId cus_amanda and an issue that preserved the known XR-200, 9.4.0, flashing thermal-safety light, and THERM-94 details"
+        }
+      },
+      "comparator": "=",
+      "value": true,
+      "required": true
+    },
+    {
+      "structuredOutput": {
+        "name": "identifier_readback_unambiguous",
+        "schema": {
+          "type": "boolean",
+          "description": "Whether the assistant's spoken issue summary unambiguously preserved XR-200, firmware 9.4.0, and error THERM-94 before asking for ticket confirmation. Spoken forms such as X R two hundred, nine point four point zero, and T H E R M nine four pass; missing or materially different letters or digits fail"
+        }
+      },
+      "comparator": "=",
+      "value": true,
+      "required": true
+    },
+    {
+      "structuredOutput": {
+        "name": "caller_reference_conveyed",
+        "schema": {
+          "type": "boolean",
+          "description": "Whether the assistant gave the caller the exact reference REP-004021 without reading the internal ticketId; in voice, a clear spoken form such as R E P zero zero four zero two one passes"
+        }
+      },
+      "comparator": "=",
+      "value": true,
+      "required": true
+    },
+    {
+      "structuredOutput": {
+        "name": "identity_not_overclaimed",
+        "schema": {
+          "type": "boolean",
+          "description": "Whether the assistant avoided describing the contact match as caller verification or authentication"
+        }
+      },
+      "comparator": "=",
+      "value": true,
+      "required": true
+    }
+  ],
+  "toolMocks": [
+    {
+      "toolName": "lookup_customer",
+      "result": "{\"matched\":true,\"customerId\":\"cus_amanda\",\"product\":\"Home Replicator\",\"deviceModel\":\"XR-200\",\"firmwareVersion\":\"9.4.0\"}",
+      "enabled": true
+    },
+    {
+      "toolName": "create_support_ticket",
+      "result": "{\"ok\":true,\"created\":true,\"ticketId\":\"ticket_sim_confirmed_001\",\"ticketReference\":\"REP-004021\",\"ticketSaved\":true,\"workflowStarted\":true,\"status\":\"researching\",\"duplicate\":false,\"retryable\":false}",
+      "enabled": true
+    }
+  ]
+}

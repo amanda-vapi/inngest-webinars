@@ -1,0 +1,29 @@
+{
+  "name": "Replicator Support Webinar",
+  "firstMessage": "Hi, Replicator Support. What can I help you with today?",
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4.1",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Loaded from vapi/assistant-system-prompt.md by scripts/deploy-vapi.mjs."
+      }
+    ]
+  },
+  "voice": {
+    "provider": "vapi",
+    "voiceId": "Elliot",
+    "version": "2"
+  },
+  "transcriber": {
+    "provider": "deepgram",
+    "model": "flux-general-en",
+    "language": "en",
+    "keyterm": [
+      "Home Replicator",
+      "XR-200",
+      "THERM-94"
+    ]
+  }
+}

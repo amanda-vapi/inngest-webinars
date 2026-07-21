@@ -1,5 +1,12 @@
 node_modules/
-.DS_Store
-.env
-data/
 dist/
+.env
+.env.*
+!.env.example
+data/
+.DS_Store
+
+# Personal working notes (never commit)
+BACKEND-HANDOFF.md
+BACKEND-REVIEW-HANDOFF.md
+WEBINAR-PRESENTER-NOTES.md

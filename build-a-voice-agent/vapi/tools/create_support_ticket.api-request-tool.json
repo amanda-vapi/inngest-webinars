@@ -1,0 +1,33 @@
+{
+  "type": "apiRequest",
+  "name": "create_support_ticket",
+  "function": {
+    "name": "api_request_tool"
+  },
+  "url": "https://YOUR-PUBLIC-URL.example.com/api/tickets",
+  "method": "POST",
+  "parameters": [
+    {
+      "key": "requestId",
+      "value": "{{ call.id }}"
+    }
+  ],
+  "body": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "customerId": { "type": "string", "description": "The customer ID returned by lookup_customer." },
+      "issue": { "type": "string", "description": "A concise description of the customer's problem in their own words." },
+      "deviceModel": { "type": "string", "description": "Device model, when known." },
+      "firmwareVersion": { "type": "string", "description": "Installed firmware version, when known." },
+      "symptom": { "type": "string", "description": "The observable symptom, when known." },
+      "errorCode": { "type": "string", "description": "The displayed error code, when known." }
+    },
+    "required": ["customerId", "issue"]
+  },
+  "timeoutSeconds": 10,
+  "messages": [
+    { "type": "request-start", "content": "I'm creating that support ticket now." },
+    { "type": "request-failed", "content": "I couldn't start the support workflow yet." }
+  ]
+}

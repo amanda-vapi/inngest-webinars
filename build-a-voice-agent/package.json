@@ -1,26 +1,38 @@
 {
-  "name": "build-a-voice-agent",
+  "name": "inngest-webinar",
   "private": true,
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "NODE_OPTIONS='--import @inngest/otel/node' tsx watch src/server.ts",
-    "start": "node --import @inngest/otel/node --import tsx src/server.ts",
+    "dev": "concurrently -k -n app,inngest -c cyan,yellow \"npm:start:watch\" \"npm:inngest:dev\"",
+    "setup:local": "node scripts/setup-local.mjs",
+    "start": "tsx src/server.ts",
+    "start:watch": "tsx watch src/server.ts",
+    "inngest:dev": "tsx scripts/inngest-dev.ts",
+    "tunnel": "node scripts/start-ngrok.mjs",
+    "setup:auth": "node scripts/setup-vapi-auth.mjs",
+    "deploy:vapi": "node scripts/deploy-vapi.mjs",
+    "check:vapi-config": "node scripts/check-vapi-config.mjs",
+    "setup:vapi-simulations": "node scripts/setup-vapi-simulations.mjs",
+    "test:demo": "node scripts/demo-test.mjs",
     "typecheck": "tsc --noEmit",
-    "inngest:dev": "tsx scripts/inngest-dev.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:coverage": "node --import tsx --experimental-test-coverage --test test/*.test.ts",
+    "test:vapi": "node scripts/vapi-chat-test.mjs",
+    "test:vapi-simulations": "node scripts/run-vapi-simulations.mjs"
   },
   "dependencies": {
-    "@inngest/otel": "^0.2.1",
-    "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/semantic-conventions": "^1.43.0",
     "better-sqlite3": "^12.8.0",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "inngest": "^4.13.0",
-    "openai": "^6.48.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.3",
+    "@types/node": "^24.0.0",
+    "concurrently": "^9.2.1",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }
