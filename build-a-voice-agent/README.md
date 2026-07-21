@@ -60,7 +60,7 @@ Configure these two function tools in Vapi to point at the public version of
 | Tool | Input |
 | --- | --- |
 | `lookup_customer` | `contact` (email or phone) |
-| `create_support_ticket` | `customerId`, `issue` |
+| `create_support_ticket` | `customerId`, `customerQuestion`, device and follow-up details |
 
 Vapi needs a public URL. During local work, expose this app with a tunnel.
 
@@ -74,7 +74,7 @@ curl -X POST http://localhost:3000/test \
   -H 'content-type: application/json' \
   -d '{
     "customerId": "cus_amanda",
-    "issue": "My replicator stopped working after the latest update.",
+    "customerQuestion": "My replicator stopped working after the latest update.",
     "deviceModel": "XR-200",
     "firmwareVersion": "9.4.0",
     "symptom": "The thermal-safety light flashes and no item is replicated.",
@@ -85,13 +85,21 @@ curl -X POST http://localhost:3000/test \
 
 Open `http://localhost:8288` and select `research-support-ticket` to follow
 the CRM, support-history, ticket-system, knowledge-base, FAQ, operations, and
-firmware fan-out, followed by the judge, draft, and delivery steps. The
+firmware fan-out, followed by research analysis and delivery. The
 complete API contract is in
 [`openapi.yaml`](./openapi.yaml).
 
 The Operations lookup deliberately returns one simulated `503` on the first
 attempt. Inngest retries that step while preserving completed research steps,
 so the trace includes a concise retry example.
+
+The app preloads `@inngest/otel/node` when started with `npm run dev` or
+`npm run start`. With `OPENAI_API_KEY` set, the OpenAI SDK emits the data that
+Inngest uses to populate the built-in AI Metadata panel on `research-analysis`.
+
+For a predictable local demo without an OpenAI request, set
+`MOCK_AI_METADATA=1`. This creates a mock OpenTelemetry GenAI span with a
+model name and token counts, so the same built-in AI Metadata panel is shown.
 
 ## Test the human-review branch
 

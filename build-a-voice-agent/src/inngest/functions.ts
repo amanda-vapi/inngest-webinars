@@ -12,30 +12,24 @@ import {
 } from "../db.js";
 import { inngest } from "./client.js";
 import { createScorer } from "inngest/experimental";
+import { mockResearchAnalysisMetadata } from "../demo/mock-ai-metadata.js";
+import OpenAI from "openai";
 
 type ModelMessage = { role: "system" | "user"; content: string };
 
+const researchModel = "gpt-4.1-mini";
+
 async function callOpenAI({ messages }: { messages: ModelMessage[] }) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({ model: "gpt-4.1-mini", response_format: { type: "json_object" }, messages }),
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return openai.chat.completions.create({
+    model: researchModel,
+    response_format: { type: "json_object" },
+    messages,
   });
-  if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
-  return (await response.json()) as { choices: Array<{ message: { content: string } }> };
 }
 
 function readJson(content: string) {
   return JSON.parse(content.replace(/^```json\s*|\s*```$/g, "")) as Record<string, unknown>;
-}
-
-async function simulateSystemLatency(system: string) {
-  const base = Number(process.env.DEMO_SYSTEM_LATENCY_MS ?? 1200);
-  const variation = [...system].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 900;
-  await new Promise((resolve) => setTimeout(resolve, base + variation));
 }
 
 // This score waits for the real-world outcome instead of asking a model to
@@ -55,35 +49,33 @@ export const customerOutcomeScorer = createScorer(
 
 export const researchSupportTicket = inngest.createFunction(
   { id: "research-support-ticket", triggers: [{ event: "support/ticket.created" }], retries: 2 },
-  async ({ event, step, defer, attempt }) => {
+  async ({ event, step, defer, attempt, demoDelay }) => {
     const ticket = await step.run("load-ticket", () => {
       const ticket = getTicket(event.data.ticketId);
       if (!ticket) throw new Error(`Ticket ${event.data.ticketId} was not found`);
       return ticket;
     });
 
-    // This is the fan-out/fan-in moment of the demo. Each database lookup is a
-    // durable step: a failure retries only that lookup, not the completed work.
     const [customer, supportHistory, relatedTickets, knowledgeBase, faqs, operations, firmware] = await Promise.all([
       step.run("crm-load-customer", async () => {
-        await simulateSystemLatency("crm");
+        await demoDelay("crm");
         return getCustomer(ticket.customer_id);
       }),
       step.run("support-history", async () => {
-        await simulateSystemLatency("support-history");
+        await demoDelay("support-history");
         return getSupportHistory(ticket.customer_id);
       }),
       step.run("ticket-system-search", async () => {
-        await simulateSystemLatency("ticket-system");
+        await demoDelay("ticket-system");
         return findRelatedTickets(ticket.customer_id, ticket.issue, ticket.id);
       }),
       step.run("knowledge-base-search", async () => {
-        await simulateSystemLatency("knowledge-base");
+        await demoDelay("knowledge-base");
         const customer = getCustomer(ticket.customer_id);
         return customer ? getKnowledgeBaseArticles(customer.replicator_model, customer.firmware_version) : [];
       }),
       step.run("faq-search", async () => {
-        await simulateSystemLatency("faq");
+        await demoDelay("faq");
         const customer = getCustomer(ticket.customer_id);
         return customer ? findFaqs(customer.product, ticket.issue) : [];
       }),
@@ -92,12 +84,12 @@ export const researchSupportTicket = inngest.createFunction(
         if (attempt === 0) {
           throw new Error("Operations API returned 503 Service Unavailable");
         }
-        await simulateSystemLatency("operations");
+        await demoDelay("operations");
         const customer = getCustomer(ticket.customer_id);
         return customer ? findKnownIssues(customer.product, ticket.issue) : [];
       }),
       step.run("firmware-service-release-details", async () => {
-        await simulateSystemLatency("firmware");
+        await demoDelay("firmware");
         const customer = getCustomer(ticket.customer_id);
         return customer ? getFirmwareRelease(customer.firmware_version) : undefined;
       }),
@@ -105,23 +97,45 @@ export const researchSupportTicket = inngest.createFunction(
 
     if (!customer) throw new Error(`Customer ${ticket.customer_id} was not found`);
 
-    const evidence = { customer, ticket, supportHistory, relatedTickets, knowledgeBase, faqs, operations, firmware };
+    const customerQuestion = ticket.issue;
+    const evidence = { customerQuestion, customer, ticket, supportHistory, relatedTickets, knowledgeBase, faqs, operations, firmware };
     const fallbackAnswer = operations[0]?.workaround ?? knowledgeBase[0]?.content ?? faqs[0]?.answer;
-    const judge = process.env.OPENAI_API_KEY
-      ? readJson(
-          (
-            await step.ai.wrap("judge-research", callOpenAI, {
-              messages: [
-                { role: "system", content: "You are a support-quality judge. Return JSON: {confident:boolean, answer:string}. Only be confident when the supplied evidence supports a safe answer." },
-                { role: "user", content: JSON.stringify(evidence) },
-              ],
-            })
-          ).choices[0].message.content,
-        )
-      : { confident: Boolean(fallbackAnswer), answer: fallbackAnswer };
-    const answer = judge.confident && typeof judge.answer === "string" ? judge.answer : undefined;
-    await step.score("score-evidence-sufficient", {
-      name: "evidence-sufficient",
+
+    const analysis = await step.run("research-analysis", async () => {
+      if (process.env.MOCK_AI_METADATA === "1") {
+        await mockResearchAnalysisMetadata();
+        return {
+          canRespond: Boolean(fallbackAnswer),
+          customerAnswer: fallbackAnswer,
+          followUpDraft: fallbackAnswer
+            ? `Hi ${customer.name},\n\n${fallbackAnswer}\n\nBest,\nReplicator Support`
+            : undefined,
+        };
+      }
+
+      if (!process.env.OPENAI_API_KEY) {
+        return {
+          canRespond: Boolean(fallbackAnswer),
+          customerAnswer: fallbackAnswer,
+          followUpDraft: fallbackAnswer
+            ? `Hi ${customer.name},\n\n${fallbackAnswer}\n\nBest,\nReplicator Support`
+            : undefined,
+        };
+      }
+      const openAI = await callOpenAI({
+        messages: [
+          { role: "system", content: "You analyze support research. Return JSON: {canRespond:boolean, customerAnswer:string, followUpDraft:string}. Only recommend a response supported by the evidence; otherwise set canRespond to false and explain the gap in customerAnswer." },
+          { role: "user", content: JSON.stringify(evidence) },
+        ],
+      });
+      const content = openAI.choices[0]?.message.content;
+      if (!content) throw new Error("OpenAI returned no research analysis");
+      const result = readJson(content);
+      return result;
+    });
+    const answer = analysis.canRespond && typeof analysis.customerAnswer === "string" ? analysis.customerAnswer : undefined;
+    await step.score("score-research-confidence", {
+      name: "research-confidence",
       value: Boolean(answer),
     });
     if (!answer) {
@@ -133,21 +147,9 @@ export const researchSupportTicket = inngest.createFunction(
       return { ticketId: ticket.id, status: "needs_human_review" };
     }
 
-    const fallbackEmail = `Hi ${customer.name},\n\n${answer}\n\nBest,\nReplicator Support`;
-    const emailBody = process.env.OPENAI_API_KEY
-      ? String(
-          readJson(
-            (
-              await step.ai.wrap("draft-customer-email", callOpenAI, {
-                messages: [
-                  { role: "system", content: "Write a concise, calm customer-support email. Return JSON: {email:string}. Do not invent facts." },
-                  { role: "user", content: JSON.stringify({ customer: customer.name, answer }) },
-                ],
-              })
-            ).choices[0].message.content,
-          ).email,
-        )
-      : fallbackEmail;
+    const emailBody = typeof analysis.followUpDraft === "string"
+      ? analysis.followUpDraft
+      : `Hi ${customer.name},\n\n${answer}\n\nBest,\nReplicator Support`;
     await step.sendEvent("queue-email", {
       name: "support/reply.ready",
       data: { ticketId: ticket.id, recipient: customer.email, body: emailBody },

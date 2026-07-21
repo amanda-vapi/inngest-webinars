@@ -70,10 +70,10 @@ components:
         warranty_status: { type: string, example: active }
     CreateTicketRequest:
       type: object
-      required: [customerId, issue]
+      required: [customerId, customerQuestion]
       properties:
         customerId: { type: string, example: cus_amanda }
-        issue: { type: string, example: My replicator stopped working after the latest update. }
+        customerQuestion: { type: string, example: My replicator stopped working after the latest update. }
         deviceModel: { type: string, example: XR-200 }
         firmwareVersion: { type: string, example: 9.4.0 }
         symptom: { type: string, example: The thermal-safety light flashes and no item is replicated. }

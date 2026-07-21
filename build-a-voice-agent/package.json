@@ -3,16 +3,20 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
+    "dev": "NODE_OPTIONS='--import @inngest/otel/node' tsx watch src/server.ts",
+    "start": "node --import @inngest/otel/node --import tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "inngest:dev": "tsx scripts/inngest-dev.ts"
   },
   "dependencies": {
+    "@inngest/otel": "^0.2.1",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
     "better-sqlite3": "^12.8.0",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
-    "inngest": "^4.13.0"
+    "inngest": "^4.13.0",
+    "openai": "^6.48.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

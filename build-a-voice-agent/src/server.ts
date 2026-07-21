@@ -22,7 +22,8 @@ function requireApiToken(request: express.Request, response: express.Response) {
 
 async function createAndTriggerTicket(input: {
   customerId: string;
-  issue: string;
+  customerQuestion?: string;
+  issue?: string;
   deviceModel?: string;
   firmwareVersion?: string;
   symptom?: string;
@@ -30,8 +31,9 @@ async function createAndTriggerTicket(input: {
   followUpMethod?: string;
 }) {
   const customer = getCustomer(input.customerId);
-  if (!customer || !input.issue) throw new Error("A valid customerId and issue are required");
-  const ticket = createTicket(customer.id, input.issue, {
+  const customerQuestion = input.customerQuestion ?? input.issue;
+  if (!customer || !customerQuestion) throw new Error("A valid customerId and customerQuestion are required");
+  const ticket = createTicket(customer.id, customerQuestion, {
     deviceModel: input.deviceModel ?? customer.replicator_model,
     firmwareVersion: input.firmwareVersion ?? customer.firmware_version,
     symptom: input.symptom,
