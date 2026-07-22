@@ -25,7 +25,7 @@ test("keeps customer identity in Vapi static call parameters", () => {
     { key: "requestId", value: "{{call.id}}" },
     { key: "callId", value: "{{call.id}}" },
   ]);
-  assert.equal(lookup.body.properties.contact, undefined);
+  assert.equal(lookup.body, undefined);
   assert.equal(ticket.body.properties.customerId, undefined);
   assert.equal(ticket.body.properties.customerQuestion !== undefined, true);
 });

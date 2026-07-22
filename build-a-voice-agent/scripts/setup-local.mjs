@@ -16,7 +16,10 @@ let replaced = false;
 const updated = lines.map((line) => {
   if (!line.startsWith("API_BEARER_TOKEN=")) return line;
   replaced = true;
-  return line === "API_BEARER_TOKEN=" ? `API_BEARER_TOKEN=${token}` : line;
+  const value = line.slice("API_BEARER_TOKEN=".length);
+  // Generate a real local secret for an empty value or the checked-in sample,
+  // but never overwrite a token the attendee has already chosen.
+  return value === "" || value === "local-demo-token" ? `API_BEARER_TOKEN=${token}` : line;
 });
 if (!replaced) updated.push(`API_BEARER_TOKEN=${token}`);
 

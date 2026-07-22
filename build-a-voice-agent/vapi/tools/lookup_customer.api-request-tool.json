@@ -11,11 +11,6 @@
     { "key": "callerNumber", "value": "{{customer.number}}" },
     { "key": "calledNumber", "value": "{{phoneNumber.number}}" }
   ],
-  "body": {
-    "type": "object",
-    "additionalProperties": false,
-    "properties": {}
-  },
   "timeoutSeconds": 10,
   "messages": [
     { "type": "request-start", "content": "Let me look up your account." },
