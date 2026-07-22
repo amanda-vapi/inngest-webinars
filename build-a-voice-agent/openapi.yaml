@@ -1,90 +1,259 @@
 openapi: 3.1.0
 info:
   title: Home Replicator Support API
-  version: 0.1.0
-  description: API contract used by the Vapi customer-service agent and local webinar test endpoint.
+  version: 0.2.0
+  description: >-
+    Authenticated support API for the Vapi + Inngest webinar. Customer ownership
+    is derived from a backend call session, never from model-controlled input.
 servers:
   - url: http://localhost:3000
+security:
+  - bearerAuth: []
 paths:
-  /api/customers:
+  /health:
     get:
-      summary: Look up a customer by email or phone
-      parameters:
-        - name: email
-          in: query
-          schema: { type: string, format: email }
-        - name: phone
-          in: query
-          schema: { type: string }
+      summary: Public liveness check
+      security: []
       responses:
-        '200': { description: Customer found, content: { application/json: { schema: { $ref: '#/components/schemas/Customer' } } } }
-        '404': { description: Customer not found }
+        '200': { description: Service is running }
+  /api/call-sessions:
+    post:
+      summary: Register trusted Vapi call context before model tool use
+      description: >-
+        The caller and called numbers must be supplied as Vapi static fields,
+        not model-generated tool arguments. The backend derives the customer
+        from callerNumber and stores a short-lived session keyed by callId.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCallSessionRequest' }
+      responses:
+        '201': { description: Session created, content: { application/json: { schema: { $ref: '#/components/schemas/CallSessionResponse' } } } }
+        '200': { description: Existing matching session returned, content: { application/json: { schema: { $ref: '#/components/schemas/CallSessionResponse' } } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Trusted caller has no customer record, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: callId already has different trusted context, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/customers/lookup:
+    post:
+      summary: Look up the customer for an active trusted call
+      description: >-
+        When callerNumber and calledNumber are present, this creates or reuses
+        the trusted call session. Vapi should send all three values as static
+        fields on its existing lookup API Request tool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/CreateCallSessionRequest'
+                - $ref: '#/components/schemas/CallIdRequest'
+      responses:
+        '200': { description: Minimum customer context for the assistant, content: { application/json: { schema: { $ref: '#/components/schemas/CustomerContext' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Call session is unknown, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Call session expired, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/tickets:
     post:
-      summary: Create a support ticket and start the Inngest workflow
+      summary: Create or retry a ticket and dispatch durable research
+      description: >-
+        requestId is the idempotency key (one ticket per Vapi call). A repeated
+        identical request returns the original ticket; reuse with different
+        content returns idempotency_conflict. customerId is intentionally absent.
       requestBody:
         required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/CreateTicketRequest' } } }
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTicketRequest' }
       responses:
-        '201': { description: Ticket created, content: { application/json: { schema: { $ref: '#/components/schemas/Ticket' } } } }
-  /test:
-    post:
-      summary: Local test shortcut for the full long-running workflow
-      description: Accepts the exact same body as POST /api/tickets, without API-token enforcement.
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/CreateTicketRequest' } } }
+        '201': { description: Ticket created and workflow accepted, content: { application/json: { schema: { $ref: '#/components/schemas/TicketResponse' } } } }
+        '200': { description: Existing idempotent ticket returned, content: { application/json: { schema: { $ref: '#/components/schemas/TicketResponse' } } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Active call session is required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Idempotency or session-state conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: Workflow dispatch failed and may be retried with the same request body, content: { application/json: { schema: { $ref: '#/components/schemas/DispatchFailure' } } } }
+  /api/tickets/{ticketId}:
+    get:
+      summary: Read ticket state (operator route)
+      parameters: [ { $ref: '#/components/parameters/TicketId' } ]
       responses:
-        '201': { description: Workflow event accepted }
+        '200': { description: Ticket found, content: { application/json: { schema: { $ref: '#/components/schemas/Ticket' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Ticket not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
   /api/tickets/{ticketId}/resolve:
     post:
-      summary: Resume a human-review wait with a technician answer
+      summary: Resume the matching human-review wait
       parameters: [ { $ref: '#/components/parameters/TicketId' } ]
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [answer], properties: { answer: { type: string } } } } }
-      responses: { '200': { description: Resolution event sent } }
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [answer], properties: { answer: { type: string } } }
+      responses:
+        '200': { description: Resolution event accepted }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Ticket not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Ticket is not waiting for human review, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: Resolution dispatch failed and may be retried, content: { application/json: { schema: { $ref: '#/components/schemas/DispatchFailure' } } } }
   /api/tickets/{ticketId}/feedback:
     post:
-      summary: Record whether the customer found the reply helpful
+      summary: Record customer feedback for deferred scoring
       parameters: [ { $ref: '#/components/parameters/TicketId' } ]
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [helpful], properties: { helpful: { type: boolean } } } } }
-      responses: { '200': { description: Feedback event sent } }
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [helpful], properties: { helpful: { type: boolean } } }
+      responses:
+        '200': { description: Feedback event accepted }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Ticket not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /api/vapi/tools:
+    post:
+      summary: Authenticated compatibility adapter for Vapi custom tools
+      description: >-
+        This adapter remains during the API Request migration. It derives callId
+        from message.call.id and rejects model-supplied customer identity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VapiToolRequest' }
+      responses:
+        '200': { description: Tool-call results, content: { application/json: { schema: { $ref: '#/components/schemas/VapiToolResponse' } } } }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /test:
+    post:
+      summary: Local-only demo shortcut
+      description: Available only when DEMO_MODE=1; the server rejects DEMO_MODE in production.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTicketRequest' }
+      responses:
+        '201': { description: Ticket created }
+        '200': { description: Existing idempotent ticket returned }
+        '404': { description: Demo mode is disabled }
 components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
   parameters:
     TicketId: { name: ticketId, in: path, required: true, schema: { type: string } }
+  responses:
+    Unauthorized:
+      description: Valid bearer authentication is required
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    InvalidRequest:
+      description: Request body does not match the API contract
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   schemas:
-    Customer:
+    CreateCallSessionRequest:
       type: object
-      required: [id, name, email, phone, product, replicator_model, firmware_version]
+      additionalProperties: false
+      required: [callId, callerNumber, calledNumber]
       properties:
-        id: { type: string, example: cus_amanda }
+        callId: { type: string, example: call_vapi_123 }
+        callerNumber: { type: string, example: '+15555550100' }
+        calledNumber: { type: string, example: '+15555550999' }
+    CallIdRequest:
+      type: object
+      additionalProperties: false
+      required: [callId]
+      properties: { callId: { type: string, example: call_vapi_123 } }
+    CallSessionResponse:
+      type: object
+      required: [callId, expiresAt, customer]
+      properties:
+        callId: { type: string }
+        expiresAt: { type: string, format: date-time }
+        customer: { $ref: '#/components/schemas/CustomerContext' }
+    CustomerContext:
+      type: object
+      required: [name, product, deviceModel, firmwareVersion]
+      properties:
         name: { type: string, example: Amanda Martin }
-        email: { type: string, format: email }
-        phone: { type: string }
         product: { type: string, example: Home Replicator }
-        replicator_model: { type: string, example: XR-200 }
-        firmware_version: { type: string, example: 9.4.0 }
-        warranty_status: { type: string, example: active }
+        deviceModel: { type: string, example: XR-200 }
+        firmwareVersion: { type: string, example: 9.4.0 }
     CreateTicketRequest:
       type: object
-      required: [customerId, customerQuestion]
+      additionalProperties: false
+      required: [callId, requestId, customerQuestion]
       properties:
-        customerId: { type: string, example: cus_amanda }
+        callId: { type: string, example: call_vapi_123 }
+        requestId: { type: string, example: request_vapi_123 }
         customerQuestion: { type: string, example: My replicator stopped working after the latest update. }
         deviceModel: { type: string, example: XR-200 }
         firmwareVersion: { type: string, example: 9.4.0 }
         symptom: { type: string, example: The thermal-safety light flashes and no item is replicated. }
         errorCode: { type: string, example: THERM-94 }
-        followUpMethod: { type: string, enum: [email, callback], example: email }
+    TicketResponse:
+      type: object
+      required: [ticketId, requestId, status, created]
+      properties:
+        ticketId: { type: string }
+        requestId: { type: string }
+        status: { type: string, enum: [event_pending, researching, event_failed] }
+        created: { type: boolean }
     Ticket:
-      allOf:
-        - $ref: '#/components/schemas/CreateTicketRequest'
-        - type: object
-          required: [id, status, created_at]
+      type: object
+      required: [id, request_id, call_id, status, created_at]
+      properties:
+        id: { type: string }
+        request_id: { type: string }
+        call_id: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+    VapiToolRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: object
+          required: [call, toolCallList]
           properties:
-            id: { type: string }
-            status: { type: string, example: researching }
-            created_at: { type: string, format: date-time }
+            call: { type: object, required: [id], properties: { id: { type: string } } }
+            toolCallList:
+              type: array
+              items:
+                type: object
+                required: [id, name]
+                properties:
+                  id: { type: string }
+                  name: { type: string, enum: [lookup_customer, create_support_ticket] }
+                  arguments: { type: object }
+    VapiToolResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [toolCallId, result]
+            properties:
+              toolCallId: { type: string }
+              result: { type: object }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, example: invalid_request }
+        message: { type: string }
+    DispatchFailure:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          required: [ticketId, status, retryable]
+          properties:
+            ticketId: { type: string }
+            status: { type: string, enum: [event_failed, needs_human_review] }
+            retryable: { type: boolean, const: true }

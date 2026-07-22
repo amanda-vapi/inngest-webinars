@@ -8,16 +8,22 @@ import {
   getSupportHistory,
   getTicket,
   recordEmail,
-  updateTicketStatus,
+  transitionTicketStatus,
 } from "../db.js";
 import { inngest } from "./client.js";
 import { createScorer } from "inngest/experimental";
 import { mockResearchAnalysisMetadata } from "../demo/mock-ai-metadata.js";
 import OpenAI from "openai";
+import { z } from "zod";
 
 type ModelMessage = { role: "system" | "user"; content: string };
 
 const researchModel = "gpt-4.1-mini";
+const researchAnalysisSchema = z.object({
+  canRespond: z.boolean(),
+  customerAnswer: z.string().min(1).max(4_000).optional(),
+  followUpDraft: z.string().min(1).max(6_000).optional(),
+}).strict();
 
 async function callOpenAI({ messages }: { messages: ModelMessage[] }) {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -72,7 +78,7 @@ export const researchSupportTicket = inngest.createFunction(
       step.run("knowledge-base-search", async () => {
         await demoDelay("knowledge-base");
         const customer = getCustomer(ticket.customer_id);
-        return customer ? getKnowledgeBaseArticles(customer.replicator_model, customer.firmware_version) : [];
+        return customer ? getKnowledgeBaseArticles(customer.replicator_model, customer.firmware_version, ticket.issue) : [];
       }),
       step.run("faq-search", async () => {
         await demoDelay("faq");
@@ -130,8 +136,9 @@ export const researchSupportTicket = inngest.createFunction(
       });
       const content = openAI.choices[0]?.message.content;
       if (!content) throw new Error("OpenAI returned no research analysis");
-      const result = readJson(content);
-      return result;
+      const result = researchAnalysisSchema.safeParse(readJson(content));
+      if (!result.success) throw new Error("OpenAI returned an invalid research analysis");
+      return result.data;
     });
     const answer = analysis.canRespond && typeof analysis.customerAnswer === "string" ? analysis.customerAnswer : undefined;
     await step.score("score-research-confidence", {
@@ -139,33 +146,48 @@ export const researchSupportTicket = inngest.createFunction(
       value: Boolean(answer),
     });
     if (!answer) {
-      await step.run("mark-needs-human-review", () => updateTicketStatus(ticket.id, "needs_human_review"));
+      const status = await step.run("mark-needs-human-review", () => {
+        transitionTicketStatus(ticket.id, ["researching"], "needs_human_review");
+        return getTicket(ticket.id)?.status;
+      });
+      if (status !== "needs_human_review") {
+        return { ticketId: ticket.id, requestId: ticket.request_id, callId: ticket.call_id, status };
+      }
       await step.sendEvent("request-human-review", {
         name: "support/escalation.requested",
-        data: { ticketId: ticket.id },
+        data: { ticketId: ticket.id, requestId: ticket.request_id, callId: ticket.call_id },
+        meta: { sessions: { ticket_id: ticket.id, call_id: ticket.call_id ?? "unknown" } },
       });
-      return { ticketId: ticket.id, status: "needs_human_review" };
+      return { ticketId: ticket.id, requestId: ticket.request_id, callId: ticket.call_id, status: "needs_human_review" };
     }
 
     const emailBody = typeof analysis.followUpDraft === "string"
       ? analysis.followUpDraft
       : `Hi ${customer.name},\n\n${answer}\n\nBest,\nReplicator Support`;
+    await step.run("mark-reply-queued", () => {
+      const transitioned = transitionTicketStatus(ticket.id, ["researching"], "reply_queued");
+      const current = getTicket(ticket.id);
+      if (!transitioned && current?.status !== "reply_queued" && current?.status !== "answered") {
+        throw new Error(`Ticket ${ticket.id} could not transition to reply_queued`);
+      }
+    });
     await step.sendEvent("queue-email", {
+      id: `support-reply-ready-${ticket.id}`,
       name: "support/reply.ready",
-      data: { ticketId: ticket.id, recipient: customer.email, body: emailBody },
+      data: { ticketId: ticket.id, requestId: ticket.request_id, callId: ticket.call_id, recipient: customer.email, body: emailBody },
     });
     defer("score-customer-feedback", {
       function: customerOutcomeScorer,
       data: { ticketId: ticket.id },
     });
 
-    return { ticketId: ticket.id, status: "reply_queued" };
+    return { ticketId: ticket.id, requestId: ticket.request_id, callId: ticket.call_id, status: "reply_queued" };
   },
 );
 
 export const waitForHumanResolution = inngest.createFunction(
   { id: "wait-for-human-resolution", triggers: [{ event: "support/escalation.requested" }] },
-  async ({ event, step }) => {
+  async ({ event, step, defer }) => {
     // This pauses the run without holding a server open. The UI/API sends the
     // matching event whenever the human supplies a resolution.
     const resolution = await step.waitForEvent("wait-for-human-resolution", {
@@ -175,8 +197,15 @@ export const waitForHumanResolution = inngest.createFunction(
     });
 
     if (!resolution) {
-      await step.run("mark-review-timeout", () => updateTicketStatus(event.data.ticketId, "review_timed_out"));
-      return { ticketId: event.data.ticketId, status: "review_timed_out" };
+      await step.run("mark-review-timeout", () =>
+        transitionTicketStatus(event.data.ticketId, ["needs_human_review"], "review_timed_out"),
+      );
+      return {
+        ticketId: event.data.ticketId,
+        requestId: event.data.requestId,
+        callId: event.data.callId,
+        status: "review_timed_out",
+      };
     }
 
     const customer = await step.run("load-customer-for-resolution", () => {
@@ -185,15 +214,34 @@ export const waitForHumanResolution = inngest.createFunction(
     });
     if (!customer) throw new Error("Customer was not found for human resolution");
 
+    await step.run("mark-human-reply-queued", () => {
+      const transitioned = transitionTicketStatus(event.data.ticketId, ["human_resolved"], "reply_queued");
+      const current = getTicket(event.data.ticketId);
+      if (!transitioned && current?.status !== "reply_queued" && current?.status !== "answered") {
+        throw new Error(`Ticket ${event.data.ticketId} could not transition to reply_queued`);
+      }
+    });
     await step.sendEvent("queue-human-approved-email", {
+      id: `support-reply-ready-${event.data.ticketId}`,
       name: "support/reply.ready",
       data: {
         ticketId: event.data.ticketId,
+        requestId: resolution.data.requestId,
+        callId: resolution.data.callId,
         recipient: customer.email,
         body: `Hi ${customer.name},\n\n${resolution.data.answer}\n\nBest,\nSupport`,
       },
     });
-    return { ticketId: event.data.ticketId, status: "reply_queued" };
+    defer("score-customer-feedback", {
+      function: customerOutcomeScorer,
+      data: { ticketId: event.data.ticketId },
+    });
+    return {
+      ticketId: event.data.ticketId,
+      requestId: event.data.requestId,
+      callId: event.data.callId,
+      status: "reply_queued",
+    };
   },
 );
 
@@ -204,9 +252,13 @@ export const sendSupportEmail = inngest.createFunction(
     // another provider later does not change the workflow around it.
     await step.run("record-email", () => {
       recordEmail(event.data.ticketId, event.data.recipient, event.data.body);
-      updateTicketStatus(event.data.ticketId, "answered");
     });
-    return { ticketId: event.data.ticketId, delivered: true };
+    return {
+      ticketId: event.data.ticketId,
+      requestId: event.data.requestId,
+      callId: event.data.callId,
+      delivered: true,
+    };
   },
 );
 

@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "NODE_OPTIONS='--import @inngest/otel/node' tsx watch src/server.ts",
-    "start": "node --import @inngest/otel/node --import tsx src/server.ts",
+    "dev": "NODE_OPTIONS='--import ./src/instrumentation.mjs' tsx watch src/server.ts",
+    "start": "node --import ./src/instrumentation.mjs --import tsx src/server.ts",
     "typecheck": "tsc --noEmit",
+    "test": "node --test --import tsx",
     "inngest:dev": "tsx scripts/inngest-dev.ts"
   },
   "dependencies": {
@@ -16,7 +17,8 @@
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "inngest": "^4.13.0",
-    "openai": "^6.48.0"
+    "openai": "^6.48.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

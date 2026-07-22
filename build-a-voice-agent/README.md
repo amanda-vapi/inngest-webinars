@@ -10,8 +10,8 @@ finds one, or waits for a human resolution when it does not.
 
 - A local SQLite database with a replicator owner, firmware release, FAQ,
   known update issue, and service-history record.
-- A Vapi custom-tool endpoint with only `lookup_customer` and
-  `create_support_ticket`.
+- Authenticated Vapi API Request endpoints for trusted call setup, customer
+  lookup, and ticket creation.
 - Three Inngest functions: research, human-review wait, and mock email send.
 
 ## Setup
@@ -46,40 +46,74 @@ For the recorded Cloud run, set these in the deployed app:
 | Variable | Used for |
 | --- | --- |
 | `VAPI_API_KEY` | Provisioning/running Vapi (added in the next step) |
+| `API_BEARER_TOKEN` | Required bearer token for Vapi and operator API routes |
 | `INNGEST_EVENT_KEY` | Sending events to Inngest Cloud |
 | `INNGEST_SIGNING_KEY` | Authenticating the deployed Inngest serve endpoint |
 
-An Inngest project ID or a custom `INNGEST_CLIENT_SECRET` is not required by
-this service. The Event Key and Signing Key identify and authenticate the app.
+`DEMO_MODE=1` enables the local `/test` shortcut. It is disabled by default in
+production and the app refuses to start in production if it is enabled. The
+app also refuses to start without `API_BEARER_TOKEN` unless explicit local demo
+mode is enabled.
+
+For Railway, attach a persistent Volume and set
+`DATABASE_PATH=/app/data/voice-agent.db`. Without persistent storage, ticket,
+call-session, and human-review state are lost when the service restarts.
 
 ## Vapi tools
 
-Configure these two function tools in Vapi to point at the public version of
-`/api/vapi/tools`:
+Keep Amanda's two API Request tools. `lookup_customer` receives trusted static
+Vapi call fields and creates or reuses the backend call session:
 
-| Tool | Input |
-| --- | --- |
-| `lookup_customer` | `contact` (email or phone) |
-| `create_support_ticket` | `customerId`, `customerQuestion`, device and follow-up details |
+```json
+{
+  "callId": "<Vapi call ID>",
+  "callerNumber": "<Vapi caller number>",
+  "calledNumber": "<Vapi called number>"
+}
+```
+
+The backend matches the customer from `callerNumber` and stores a short-lived
+call session. The model must never provide a customer ID, email, or phone
+number. The two tools use:
+
+| Tool | Route | Model-facing input |
+| --- | --- | --- |
+| `lookup_customer` | `POST /api/customers/lookup` | `callId`, `callerNumber`, `calledNumber` (all static Vapi fields) |
+| `create_support_ticket` | `POST /api/tickets` | `customerQuestion`, optional device details; `callId` and `requestId` are static Vapi fields |
+
+Every `/api/*` tool and operator route requires
+`Authorization: Bearer $API_BEARER_TOKEN`. The temporary `/api/vapi/tools`
+adapter is also authenticated, but is not the primary integration contract.
 
 Vapi needs a public URL. During local work, expose this app with a tunnel.
 
 ## Test the long-running workflow
 
-With the app and Inngest Dev Server running, post the same payload that Vapi
-will use to create a ticket:
+With the app and Inngest Dev Server running, establish Amanda's trusted demo
+call session through the same lookup route Vapi uses:
+
+```bash
+curl -X POST http://localhost:3000/api/customers/lookup \
+  -H 'Authorization: Bearer local-demo-token' \
+  -H 'content-type: application/json' \
+  -d '{"callId":"call_amanda_demo","callerNumber":"+15555550100","calledNumber":"+15555550999"}'
+```
+
+Then post the ticket payload. `/test` bypasses bearer authentication only when
+`DEMO_MODE=1`, but it still requires the same trusted call session and ticket
+contract as Vapi:
 
 ```bash
 curl -X POST http://localhost:3000/test \
   -H 'content-type: application/json' \
   -d '{
-    "customerId": "cus_amanda",
+    "callId": "call_amanda_demo",
+    "requestId": "request_amanda_demo",
     "customerQuestion": "My replicator stopped working after the latest update.",
     "deviceModel": "XR-200",
     "firmwareVersion": "9.4.0",
     "symptom": "The thermal-safety light flashes and no item is replicated.",
-    "errorCode": "THERM-94",
-    "followUpMethod": "email"
+    "errorCode": "THERM-94"
   }'
 ```
 
@@ -93,13 +127,19 @@ The Operations lookup deliberately returns one simulated `503` on the first
 attempt. Inngest retries that step while preserving completed research steps,
 so the trace includes a concise retry example.
 
-The app preloads `@inngest/otel/node` when started with `npm run dev` or
-`npm run start`. With `OPENAI_API_KEY` set, the OpenAI SDK emits the data that
-Inngest uses to populate the built-in AI Metadata panel on `research-analysis`.
+Set `ENABLE_AI_METADATA=1` to preload `@inngest/otel/node` when started with
+`npm run dev` or `npm run start`. With `OPENAI_API_KEY` set, the OpenAI SDK
+emits the data that Inngest uses to populate the built-in AI Metadata panel on
+`research-analysis`.
 
 For a predictable local demo without an OpenAI request, set
 `MOCK_AI_METADATA=1`. This creates a mock OpenTelemetry GenAI span with a
 model name and token counts, so the same built-in AI Metadata panel is shown.
+
+`@inngest/otel` currently introduces transitive `npm audit` findings. It is
+loaded only when `ENABLE_AI_METADATA=1`; leave that flag unset for a public
+deployment until the dependency exposure is explicitly accepted or a supported
+non-vulnerable release is available.
 
 ## Test the human-review branch
 
@@ -108,6 +148,7 @@ the workflow reaches its wait step:
 
 ```bash
 curl -X POST http://localhost:3000/api/tickets/TICKET_ID/resolve \
+  -H 'Authorization: Bearer local-demo-token' \
   -H 'content-type: application/json' \
   -d '{"answer":"We are investigating this and will follow up."}'
 ```
