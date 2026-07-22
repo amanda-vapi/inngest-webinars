@@ -1,0 +1,20 @@
+{
+  "suiteName": "Replicator Support Webinar - Production Behaviors",
+  "simulations": [
+    {
+      "name": "Replicator Support - Confirmed Ticket",
+      "scenarioFile": "confirmed-ticket.scenario.json",
+      "personalityName": "Decisive Derek"
+    },
+    {
+      "name": "Replicator Support - Unknown Caller",
+      "scenarioFile": "unknown-caller.scenario.json",
+      "personalityName": "Impatient Irene"
+    },
+    {
+      "name": "Replicator Support - Workflow Dispatch Failure",
+      "scenarioFile": "workflow-dispatch-failure.scenario.json",
+      "personalityName": "Skeptical Sam"
+    }
+  ]
+}

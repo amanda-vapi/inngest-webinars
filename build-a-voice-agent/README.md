@@ -87,6 +87,38 @@ adapter is also authenticated, but is not the primary integration contract.
 
 Vapi needs a public URL. During local work, expose this app with a tunnel.
 
+### Provision the Vapi demo
+
+The repository includes Amanda's Vapi assistant, API Request tools, and
+simulation assets. After the local app is running:
+
+```bash
+npm run setup:auth
+npm run tunnel
+# In another terminal after the tunnel is available:
+npm run deploy:vapi
+npm run check:vapi-config
+```
+
+`setup:auth` creates a Vapi bearer credential that uses the same
+`API_BEARER_TOKEN` as this app. `deploy:vapi` upserts exactly two API Request
+tools and the assistant, then writes their Vapi IDs and public URL to `.env`.
+The lookup tool sends `{{call.id}}`, `{{customer.number}}`, and
+`{{phoneNumber.number}}` as static parameters; they are not model-generated
+arguments. The ticket tool sends `{{call.id}}` as both its static `callId` and
+idempotent `requestId`.
+
+To provision the optional Vapi simulation suite after deploying the assistant:
+
+```bash
+npm run setup:vapi-simulations
+npm run test:vapi-simulations
+```
+
+The assistant is intended for a Vapi phone call. The web-chat helper is not a
+substitute for a phone call because it does not provide the trusted caller and
+called-number variables used by the lookup tool.
+
 ## Test the long-running workflow
 
 With the app and Inngest Dev Server running, establish Amanda's trusted demo

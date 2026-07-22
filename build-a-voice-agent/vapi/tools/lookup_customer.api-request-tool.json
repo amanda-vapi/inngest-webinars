@@ -1,0 +1,24 @@
+{
+  "type": "apiRequest",
+  "name": "lookup_customer",
+  "function": {
+    "name": "api_request_tool"
+  },
+  "url": "https://YOUR-PUBLIC-URL.example.com/api/customers/lookup",
+  "method": "POST",
+  "parameters": [
+    { "key": "callId", "value": "{{call.id}}" },
+    { "key": "callerNumber", "value": "{{customer.number}}" },
+    { "key": "calledNumber", "value": "{{phoneNumber.number}}" }
+  ],
+  "body": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "timeoutSeconds": 10,
+  "messages": [
+    { "type": "request-start", "content": "Let me look up your account." },
+    { "type": "request-failed", "content": "I couldn't look up the account just yet." }
+  ]
+}

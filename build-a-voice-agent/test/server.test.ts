@@ -110,7 +110,8 @@ test("startup migrates a legacy database created by the original project", () =>
   const migrated = new Database(databasePath);
   const columns = migrated.prepare("PRAGMA table_info(support_tickets)").all() as Array<{ name: string }>;
   assert.equal(columns.some((column) => column.name === "request_id"), true);
-  assert.equal(migrated.prepare("SELECT customer_id FROM service_history WHERE id = 'service_amanda_filter'").get().customer_id, "cus_amanda");
+  const migratedHistory = migrated.prepare("SELECT customer_id FROM service_history WHERE id = 'service_amanda_filter'").get() as { customer_id: string };
+  assert.equal(migratedHistory.customer_id, "cus_amanda");
   migrated.close();
   rmSync(directory, { recursive: true, force: true });
 });
@@ -260,7 +261,8 @@ test("human resolution is state-checked and outbound delivery is idempotent", as
   updateTicketStatus(ticket.id, "reply_queued");
   recordEmail(ticket.id, "amanda.martin@example.com", "Hello");
   recordEmail(ticket.id, "amanda.martin@example.com", "Hello");
-  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM outbound_messages WHERE ticket_id = ?").get(ticket.id).count, 1);
+  const messageCount = db.prepare("SELECT COUNT(*) AS count FROM outbound_messages WHERE ticket_id = ?").get(ticket.id) as { count: number };
+  assert.equal(messageCount.count, 1);
   assert.equal(getTicket(ticket.id)?.status, "answered");
 });
 

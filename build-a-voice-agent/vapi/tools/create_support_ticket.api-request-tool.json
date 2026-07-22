@@ -1,0 +1,36 @@
+{
+  "type": "apiRequest",
+  "name": "create_support_ticket",
+  "function": {
+    "name": "api_request_tool"
+  },
+  "url": "https://YOUR-PUBLIC-URL.example.com/api/tickets",
+  "method": "POST",
+  "parameters": [
+    {
+      "key": "requestId",
+      "value": "{{call.id}}"
+    },
+    {
+      "key": "callId",
+      "value": "{{call.id}}"
+    }
+  ],
+  "body": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "customerQuestion": { "type": "string", "description": "The customer's support problem in their own words." },
+      "deviceModel": { "type": "string", "description": "Device model, when known." },
+      "firmwareVersion": { "type": "string", "description": "Installed firmware version, when known." },
+      "symptom": { "type": "string", "description": "The observable symptom, when known." },
+      "errorCode": { "type": "string", "description": "The displayed error code, when known." }
+    },
+    "required": ["customerQuestion"]
+  },
+  "timeoutSeconds": 10,
+  "messages": [
+    { "type": "request-start", "content": "I'm creating that support ticket now." },
+    { "type": "request-failed", "content": "I couldn't start the support workflow yet." }
+  ]
+}
