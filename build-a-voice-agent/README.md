@@ -169,7 +169,8 @@ For a predictable local demo without an OpenAI request, set
 model name and token counts, so the same built-in AI Metadata panel is shown.
 
 `@inngest/otel` currently introduces transitive `npm audit` findings. It is
-loaded only when `ENABLE_AI_METADATA=1`; leave that flag unset for a public
+disabled by default (`ENABLE_AI_METADATA=0`) and loaded only when you explicitly
+set `ENABLE_AI_METADATA=1` for a controlled demo. Leave it disabled for a public
 deployment until the dependency exposure is explicitly accepted or a supported
 non-vulnerable release is available.
 

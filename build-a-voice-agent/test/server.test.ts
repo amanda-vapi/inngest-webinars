@@ -14,7 +14,8 @@ process.env.VOICE_AGENT_NO_LISTEN = "1";
 process.env.INNGEST_DEV = "1";
 
 const { createApp } = await import("../src/server.js");
-const { db, getKnowledgeBaseArticles, getTicket, recordEmail, updateTicketStatus } = await import("../src/db.js");
+const { createTicket, db, getKnowledgeBaseArticles, getTicket, recordEmail, updateTicketStatus } = await import("../src/db.js");
+const { researchSupportTicket } = await import("../src/inngest/functions.js");
 
 const sentEvents: Array<Record<string, unknown>> = [];
 let failDispatch = false;
@@ -238,6 +239,52 @@ test("failed dispatch is visible and an identical retry resumes the existing tic
 test("unrelated questions do not receive the thermal-safety knowledge-base answer", () => {
   assert.deepEqual(getKnowledgeBaseArticles("XR-200", "9.4.0", "Where can I find a replacement delivery?"), []);
   assert.equal(getKnowledgeBaseArticles("XR-200", "9.4.0", "The latest update left thermal safety on.").length, 1);
+});
+
+test("research workflow queues an answer for a known issue and human review for an unrelated issue", async () => {
+  const originalOpenAIKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = "";
+
+  const runResearch = async (issue: string) => {
+    const ticket = createTicket({
+      requestId: `workflow_${crypto.randomUUID()}`,
+      callId: `call_workflow_${crypto.randomUUID()}`,
+      customerId: "cus_amanda",
+      issue,
+    }, { deviceModel: "XR-200", firmwareVersion: "9.4.0" });
+    updateTicketStatus(ticket.id, "researching");
+    const events: Array<{ name: string; data: Record<string, unknown> }> = [];
+    const step = {
+      run: async (_id: string, fn: () => unknown) => fn(),
+      sendEvent: async (_id: string, event: { name: string; data: Record<string, unknown> }) => {
+        events.push(event);
+      },
+      score: async () => undefined,
+    };
+    const fn = (researchSupportTicket as unknown as {
+      fn: (tools: Record<string, unknown>) => Promise<unknown>;
+    }).fn;
+    await fn({
+      event: { data: { ticketId: ticket.id, requestId: ticket.request_id, callId: ticket.call_id } },
+      step,
+      attempt: 1,
+      defer: () => undefined,
+      demoDelay: async () => undefined,
+    });
+    return { ticket, events };
+  };
+
+  try {
+    const known = await runResearch("My replicator stopped working after the 9.4.0 update and thermal safety is flashing.");
+    assert.equal(getTicket(known.ticket.id)?.status, "reply_queued");
+    assert.equal(known.events[0]?.name, "support/reply.ready");
+
+    const unrelated = await runResearch("Where is my replacement delivery?");
+    assert.equal(getTicket(unrelated.ticket.id)?.status, "needs_human_review");
+    assert.equal(unrelated.events[0]?.name, "support/escalation.requested");
+  } finally {
+    process.env.OPENAI_API_KEY = originalOpenAIKey;
+  }
 });
 
 test("human resolution is state-checked and outbound delivery is idempotent", async () => {
